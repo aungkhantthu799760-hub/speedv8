@@ -258,12 +258,12 @@ def gen_code(mode, length, scan_method="random"):
             elif mode == "mix": return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
     except Exception: pass
     return ""
-  # =====================================================================
-# kavin_v8.py - KAVIN FAST SPEED V8 (Part 2 of 2)
+# =====================================================================
+# kavin_v8.py - KAVIN FAST SPEED V8 (Part 2 of 2) - FIXED
 # =====================================================================
 
 # =====================================================================
-# V8 DASHBOARD RENDERER (Emoji Version)
+# V8 DASHBOARD RENDERER
 # =====================================================================
 def get_dashboard_renderable(mode, length, scan_method, current_code, tested, elapsed, 
                              status, hits, speed, cur_mac, cur_ip, 
@@ -322,16 +322,15 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested, el
 
     voucher_panel = Panel(v_table, title="[bold bright_green]🎁 VALID Voucher code[/bold bright_green]", title_align="center", border_style="green", box=ROUNDED, height=12)
 
-    # --- FOOTER PANEL ---
-    footer_text = Text.assemble(("💡 အချိန်ပေးပြီးရှာပါခများ keyဝယ်ယူရန် 💡\n", "bold yellow"), 
-                                ("👑 @kavin799 👑", "bold bright_cyan"))
-    footer_panel = Panel(Align.center(footer_text), border_style="red", box=ROUNDED, height=4)
+    # --- FOOTER PANEL (အောက်ဆုံးမှာ @kavin799 တစ်ခုတည်း) ---
+    footer_text = Text.assemble(("\n👑 @kavin799 👑\n", "bold bright_cyan"), justify="center")
+    footer_panel = Panel(Align.center(footer_text), border_style="red", box=ROUNDED, height=3)
 
     body_layout = Layout()
     body_layout.split_column(
         Layout(stats_panel, size=10),
         Layout(voucher_panel, ratio=1),
-        Layout(footer_panel, size=4)
+        Layout(footer_panel, size=3)
     )
     layout["body"].update(body_layout)
     return layout
@@ -370,9 +369,10 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
     conn_limit = aiohttp.TCPConnector(limit=100, ssl=False, ttl_dns_cache=300)
 
     async with aiohttp.ClientSession(connector=conn_limit) as session:
+        # ⭐ Dashboard တုန်တာသက်သာအောင် refresh_per_second ကို 2 ပဲထားပြီး၊ transient=False ထည့်ထားတယ်
         live = Live(
             get_dashboard_renderable(mode_str, length, scan_method, "", tested, "00:00:00", "Init", hits, 0.0, current_mac[0], current_ip[0], 0, sess_stat[0], sess_id[0]), 
-            refresh_per_second=4, screen=True
+            refresh_per_second=2, screen=True, transient=False
         )
 
         with live:
