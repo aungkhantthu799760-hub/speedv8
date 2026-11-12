@@ -1,5 +1,5 @@
 # =====================================================================
-# kavin_v8_fixed.py - KAVIN FAST SPEED V8 (Part 1 of 4)
+# kavin_v8.py - KAVIN FAST SPEED V8 (Part 1 of 4)
 # Imports, Config, Utilities, License
 # =====================================================================
 
@@ -132,7 +132,7 @@ def activate_license(key):
             return False, f"Error: {e}"
     return False, "No license module"
 # =====================================================================
-# kavin_v8_fixed.py - KAVIN FAST SPEED V8 (Part 2 of 4)
+# kavin_v8.py - KAVIN FAST SPEED V8 (Part 2 of 4)
 # Portal Detection, Hits File, Ruijie Session
 # =====================================================================
 
@@ -289,7 +289,7 @@ async def fetch_official_session(session, gw_params, current_mac_ref, current_ip
 
     return None, "FAILED"
 # =====================================================================
-# kavin_v8_fixed.py - KAVIN FAST SPEED V8 (Part 3 of 4)
+# kavin_v8.py - KAVIN FAST SPEED V8 (Part 3 of 4)
 # Hit Detection, Test Code, Code Generation, Notification, Dashboard
 # =====================================================================
 
@@ -441,17 +441,6 @@ def notify_hit(code, plan):
     except Exception:
         pass
 
-    try:
-        from win10toast import ToastNotifier
-        toaster = ToastNotifier()
-        toaster.show_toast(
-            "VOUCHER HIT!",
-            f"Code: {code}\nPlan: {plan}",
-            duration=5
-        )
-    except Exception:
-        pass
-
 
 # ===================== DASHBOARD =====================
 from rich.console import Console as _Console
@@ -589,7 +578,7 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested,
         box=ROUNDED
     )
 
-    footer_text = Text("👑 @kavin799 👑", style="bold bright_cyan", justify="center")
+    footer_text = Text("👑 @khant7997 👑", style="bold bright_cyan", justify="center")
 
     body_layout = Layout()
     body_layout.split_column(
@@ -601,7 +590,7 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested,
     layout["body"].update(body_layout)
     return layout
 # =====================================================================
-# kavin_v8_fixed.py - KAVIN FAST SPEED V8 (Part 4 of 4)
+# kavin_v8.py - KAVIN FAST SPEED V8 (Part 4 of 4)
 # Main Scan Loop, Menus, Entry Point
 # =====================================================================
 
@@ -654,7 +643,6 @@ async def scan_loop_async(mode, length, scan_method="random", format_type="plain
             live_started = True
 
             while True:
-                # ---- Session refresh ----
                 if sess_data[0] is None or session_code_count[0] >= CODES_PER_SESSION:
                     current_status[0] = "Refreshing Session..."
                     res, err_msg = await fetch_official_session(
@@ -687,7 +675,6 @@ async def scan_loop_async(mode, length, scan_method="random", format_type="plain
                     session_code_count[0] = 0
                     current_status[0] = "Scanning..."
 
-                # ---- Generate batch ----
                 batch_codes = []
                 max_attempts = CONCURRENCY_LIMIT * 10
                 attempts = 0
@@ -769,7 +756,6 @@ async def scan_loop_async(mode, length, scan_method="random", format_type="plain
                         current_ip[0] = generate_random_ip()
                         break
 
-                    # Hit Detection
                     is_hit = False
                     try:
                         j = json.loads(res)
@@ -838,7 +824,6 @@ async def scan_loop_async(mode, length, scan_method="random", format_type="plain
                 except Exception:
                     pass
 
-            # FINAL SUMMARY
             if hits:
                 console.print("\n")
                 console.print(Panel(
@@ -937,7 +922,6 @@ def ask_format():
         return {"1": "plain", "2": "upper", "3": "dash"}[choice]
 
 
-# ===================== RUN =====================
 def run():
     show_banner()
     portal_url = auto_detect_portal()
@@ -1036,7 +1020,7 @@ def main():
             pass
         try:
             console.print("\n\n")
-            console.print(Text("✨ Thank You • Contact @kavin799 for Key 🙏",
+            console.print(Text("✨ Thank You • Contact @khant7997 for Key 🙏",
                                style="bold bright_green"), justify="center")
             console.print("\n\n")
             time.sleep(1)
