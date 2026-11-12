@@ -1,5 +1,5 @@
 # =====================================================================
-# license.py - License Management with Device Lock (Minute-Based)
+# license.py - License Management with Device Lock (Termux Fixed)
 # KAVIN FAST SPEED V8
 # =====================================================================
 
@@ -16,19 +16,24 @@ from datetime import datetime, timedelta
 LICENSE_FILE = "license.dat"
 SECRET_KEY = b"KavinFastSpeed2024SecretKey!@#$%^&*()"
 
-MAX_MINUTES = 3650 * 24 * 60   # ၁၀ နှစ်
+MAX_MINUTES = 3650 * 24 * 60
 
 
 # =====================================================================
-#  STABLE DEVICE ID
+#  STABLE DEVICE ID (Termux Fix)
 # =====================================================================
 def get_stable_device_id():
-    """တည်ငြိမ်တဲ့ device ID (run တိုင်း တူတူ)"""
+    """တည်ငြိမ်တဲ့ device ID (Termux မှာ MAC မပြောင်းတော့အောင်)"""
     try:
+        # Termux ရဲ့ MAC address က ပြောင်းတတ်လို့ Hostname ကို အဓိက သုံးပါမယ်
+        hostname = platform.node()
+        if not hostname:
+            hostname = str(uuid.getnode())
+        
         parts = [
-            str(uuid.getnode()),        # MAC address
-            platform.system(),          # Android / Linux / Windows
-            platform.machine(),         # arm64 / x86_64
+            hostname,                   # Termux device name
+            platform.system(),          # Android / Linux
+            platform.machine(),         # arm64
         ]
         raw = "|".join(parts)
         return hashlib.sha256(raw.encode()).hexdigest()[:24]
